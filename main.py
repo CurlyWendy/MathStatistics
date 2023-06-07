@@ -20,30 +20,6 @@ class RandomVariable(ABC):
         pass
 
 
-class UniformRandomVariable(RandomVariable):
-    def __init__(self, a=0, b=1) -> None:
-        super().__init__()
-        self.a = a
-        self.b = b
-
-    def pdf(self, x):
-        if x >= self.a and x <= self.b:
-            return 1 / (self.b - self.a)
-        else:
-            return 0
-
-    def cdf(self, x):
-        if x <= self.a:
-            return 0
-        elif x >= self.b:
-            return 1
-        else:
-            return (x - self.a) / (self.b - self.a)
-
-    def quantile(self, alpha):
-        return self.a + alpha * (self.b - self.a)
-
-
 class LaplaceDistribution(RandomVariable):
     def __init__(self, location, scale):
         self.location = location
@@ -113,20 +89,19 @@ class SimpleRandomNumberGenerator(RandomNumberGenerator):
 
 
 class TukeyRandomNumberGenerator(RandomNumberGenerator):
-    def __init__(self, random_variable: RandomVariable, uniform_variable: RandomVariable, epsilon):
-        super().__init__(random_variable)
-        self.epsilon = epsilon
-        self.uniform_variable = uniform_variable
+    def __init__(self, sample, location, scale, proc):
+        self.data = sample
+        self.location = location
+        self.scale = scale
+        self.proc = proc
 
     def get(self, N):
-        sample = []
-        us = np.random.uniform(0, 1, N)
-        for x in us:
-            if x < self.epsilon:
-                sample.append(self.uniform_variable.quantile(random.random()))
-            else:
-                sample.append(self.random_variable.quantile(random.random()))
-        return sample
+        proc_count = int(self.proc * N)
+        outliersRV = LaplaceDistribution(self.location, self.scale)
+        generator = SimpleRandomNumberGenerator(outliersRV)
+        outliers = generator.get(proc_count)
+        data_proc = np.concatenate((self.data, outliers))
+        return data_proc
 
 
 class Estimation(ABC):
@@ -142,17 +117,28 @@ class HodgesLehmannEstimation(Estimation):
         return np.median(means)
 
 
-class HalfSumOrderStatisticsEstimation(Estimation):
+class HalfSumEstimation(Estimation):
     def estimate(self, sample):
-        sorted_data = np.sort(sample)
-        r = int(len(sorted_data) / 2)
-        estimate = (sorted_data[r] + sorted_data[1 - r]) / 2
-        return estimate
+        sorted_sample = sorted(sample)
+        n = len(sorted_sample)
+        r = 0.5 * n  # выбираем полусумму порядковых статистик
+
+
+        if r.is_integer():
+            r = int(r)
+            half_sum = 0.5 * (sorted_sample[r-1] + sorted_sample[n-r])  # полусумма двух соседних статистик
+        else:
+            r_floor = int(r // 1)  # нижняя целая часть
+            r_ceil = r_floor + 1  # верхняя целая часть
+            half_sum = 0.5 * (sorted_sample[r_floor-1] + sorted_sample[n-r_ceil])  # полусумма двух соседних статистик
+
+        return half_sum
 
 
 class Mean(Estimation):
     def estimate(self, sample):
         return statistics.mean(sample)
+
 
 
 class Var(Estimation):
@@ -226,31 +212,26 @@ class SmoothedRandomVariable(RandomVariable):
         raise NotImplementedError
 
 
-# location = int(input("Введите location: "))
-# scale = int(input("Введите scale: "))
-# N = int(input("Введите N: "))
-# bandwidth = float(input('Введите параметр размытости: '))
-
 location = 0
 scale = 1
 N = 500
-resample_count = 50
+resample_count = 100
 bandwidth = 0.05
 
 rv = LaplaceDistribution(location, scale)
-uniformRV = UniformRandomVariable(location, scale)
 generator = SimpleRandomNumberGenerator(rv)
 sample = generator.get(N)
 rv1 = NonParametricRandomVariable(sample)
 generator1 = SimpleRandomNumberGenerator(rv1)
-generator2 = TukeyRandomNumberGenerator(rv, uniformRV, 0.5)
+generator2 = TukeyRandomNumberGenerator(sample, location, 2, 0.1)
 
-modelling = Modelling(generator2, [HodgesLehmannEstimation(), HalfSumOrderStatisticsEstimation()], resample_count,
+modelling = Modelling(generator2, [HodgesLehmannEstimation(), HalfSumEstimation()], resample_count,
                       location)
 modelling.run()
 estimate_mse = modelling.estimate_mse()
 print(estimate_mse)
 print(f'Первая оценка / Вторая оценка: {estimate_mse[0] / estimate_mse[1]}')
+print(f'Вторая оценка / Первая оценка: {estimate_mse[1] / estimate_mse[0]}')
 
 samples = modelling.get_samples()
 POINTS = 100
