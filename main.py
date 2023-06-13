@@ -193,12 +193,12 @@ class RandomNumberGenerator(ABC):
         self.random_variable = random_variable
 
     @abstractmethod
-    def get(self, N):
+    def get(self, size_sample):
         """
         Генерация случайных чисел.
 
         Args:
-            N: Количество случайных чисел для генерации.
+            size_sample: Количество случайных чисел для генерации.
 
         Returns:
             Массив сгенерированных случайных чисел.
@@ -218,23 +218,23 @@ class SimpleRandomNumberGenerator(RandomNumberGenerator):
         """
         super().__init__(random_variable)
 
-    def get(self, N):
+    def get(self, size_sample):
         """
         Генерация случайных величин с помощью простого генератора случайных величин.
 
         Args:
-            N: Количество случайных чисел для генерации.
+            size_sample: Количество случайных чисел для генерации.
 
         Returns:
             Массив сгенерированных случайных чисел.
         """
-        us = np.random.uniform(0, 1, N)
+        us = np.random.uniform(0, 1, size_sample)
         return np.vectorize(self.random_variable.quantile)(us)
 
 
 class TukeyRandomNumberGenerator(RandomNumberGenerator):
     """Генератор случайных чисел Тьюки."""
-    def __init__(self, sample, location, scale, proc):
+    def __init__(self, sample, location, scale, procent):
         """
         Инициализация генератора случайных чисел Тьюки с указанными параметрами.
 
@@ -242,29 +242,29 @@ class TukeyRandomNumberGenerator(RandomNumberGenerator):
             sample: Оригинальная выборка.
             location: Параметр масштаба.
             scale: Параметр сдвига.
-            proc: Доля выбросов.
+            procent: Доля выбросов.
         """
         self.data = sample
         self.location = location
         self.scale = scale
-        self.proc = proc
+        self.procent = procent
 
-    def get(self, N):
+    def get(self, size_sample):
         """
         Генерация случайных чисел с помощью генератора случайных чисел Тьюки.
 
         Args:
-            N: Количество случайных чисел для генерации.
+            size_sample: Количество случайных чисел для генерации.
 
         Returns:
             Массив сгенерированных случайных чисел.
         """
-        proc_count = int(self.proc * N)
-        outliersRV = LaplaceDistribution(self.location, self.scale)
-        generator = SimpleRandomNumberGenerator(outliersRV)
-        outliers = generator.get(proc_count)
-        data_proc = np.concatenate((self.data, outliers))
-        return data_proc
+        procent_count = int(self.procent * size_sample)
+        outliers_random_variable = LaplaceDistribution(self.location, self.scale)
+        generator = SimpleRandomNumberGenerator(outliers_random_variable)
+        outliers = generator.get(procent_count)
+        data_procent = np.concatenate((self.data, outliers))
+        return data_procent
 
 
 class Estimation(ABC):
@@ -295,8 +295,8 @@ class HodgesLehmannEstimation(Estimation):
         Returns:
             Оценка параметра масштаба.
         """
-        n = len(sample)
-        means = [(sample[i] + sample[j]) / 2 for i in range(n) for j in range(i, n)]
+        size = len(sample)
+        means = [(sample[i] + sample[j]) / 2 for i in range(size) for j in range(i, size)]
         return np.median(means)
 
 
@@ -313,17 +313,17 @@ class HalfSumEstimation(Estimation):
             Оценка параметра масштаба.
         """
         sorted_sample = sorted(sample)
-        n = len(sorted_sample)
-        r = 0.5 * n
+        size = len(sorted_sample)
+        range = 0.5 * size
 
 
-        if r.is_integer():
-            r = int(r)
-            half_sum = 0.5 * (sorted_sample[r-1] + sorted_sample[n-r])
+        if range.is_integer():
+            range = int(range)
+            half_sum = 0.5 * (sorted_sample[range-1] + sorted_sample[size-range])
         else:
-            r_floor = int(r // 1)
-            r_ceil = r_floor + 1
-            half_sum = 0.5 * (sorted_sample[r_floor-1] + sorted_sample[n-r_ceil])
+            range_floor = int(range // 1)
+            range_ceil = range_floor + 1
+            half_sum = 0.5 * (sorted_sample[range_floor-1] + sorted_sample[size-range_ceil])
 
         return half_sum
 
@@ -360,22 +360,22 @@ class Var(Estimation):
 
 class Modelling(ABC):
     """Абстрактный базовый класс для моделирования."""
-    def __init__(self, gen: RandomNumberGenerator, estimations: list, M: int, truth_value: float):
+    def __init__(self, gen: RandomNumberGenerator, estimations: list, size_resample: int, truth_value: float):
         """
         Инициализация моделирования с указанными параметрами.
 
         Args:
             gen: Генератор случайных чисел.
             estimations (list) : Список оценок, которые необходимо выполнить.
-            M (int) : Количество ре-выборок.
+            size_resample (int) : Количество ре-выборок.
             truth_value (float) : Истинное значение.
         """
         self.gen = gen
         self.estimations = estimations
-        self.M = M
+        self.size_resample = size_resample
         self.truth_value = truth_value
 
-        self.estimations_sample = np.zeros((self.M, len(self.estimations)), dtype=np.float64)
+        self.estimations_sample = np.zeros((self.size_resample, len(self.estimations)), dtype=np.float64)
 
     def estimate_bias_sqr(self):
         """
@@ -414,14 +414,14 @@ class Modelling(ABC):
         """
         return self.estimations_sample
 
-    def get_sample(self, N):
+    def get_sample(self, size_sample):
         """
         Получить сгенерированную выборку.
 
         Returns:
             Сгенерированная выборка.
         """
-        return self.gen.get(N)
+        return self.gen.get(size_sample)
 
     def run(self):
         """
@@ -429,8 +429,8 @@ class Modelling(ABC):
 
         Выполнить указанное количество итераций с сохранением образца оценки.
         """
-        for i in range(self.M):
-            sample = self.get_sample(N)
+        for i in range(self.size_resample):
+            sample = self.get_sample(self.size_sample)
             self.estimations_sample[i, :] = [e.estimate(sample) for e in self.estimations]
 
 
@@ -470,16 +470,16 @@ class SmoothedRandomVariable(RandomVariable):
         else:
             return 1
 
-    def __init__(self, sample, h):
+    def __init__(self, sample, bandwidth):
         """
         Инициализация параметров для сглаживания случайной величины.
 
         Args:
             sample: Выборка.
-            h: Параметр сглаживания.
+            bandwidth: Параметр сглаживания.
         """
         self.sample = sample
-        self.h = h
+        self.bandwidth = bandwidth
 
     def pdf(self, x):
         """
@@ -491,7 +491,7 @@ class SmoothedRandomVariable(RandomVariable):
         Returns:
             Значение плотности вероятности для случайной величины.
         """
-        return np.mean([SmoothedRandomVariable._k((x - y) / self.h) for y in self.sample]) / self.h
+        return np.mean([SmoothedRandomVariable._k((x - y) / self.bandwidth) for y in self.sample]) / self.bandwidth
 
     def cdf(self, x):
         """
@@ -503,7 +503,7 @@ class SmoothedRandomVariable(RandomVariable):
         Returns:
             Значение функции распределения для данной случайной величины.
         """
-        return np.mean([SmoothedRandomVariable._K((x - y) / self.h) for y in self.sample])
+        return np.mean([SmoothedRandomVariable._K((x - y) / self.bandwidth) for y in self.sample])
 
     def quantile(self, alpha):
         """
@@ -520,15 +520,15 @@ class SmoothedRandomVariable(RandomVariable):
 
 location = 0
 scale = 1
-N = 500
+size_sample = 500
 resample_count = 100
 bandwidth = 0.05
 
-rv = LaplaceDistribution(location, scale)
-generator = SimpleRandomNumberGenerator(rv)
-sample = generator.get(N)
-rv1 = NonParametricRandomVariable(sample)
-generator1 = SimpleRandomNumberGenerator(rv1)
+random_variable = LaplaceDistribution(location, scale)
+generator = SimpleRandomNumberGenerator(random_variable)
+sample = generator.get(size_sample)
+random_variable_2 = NonParametricRandomVariable(sample)
+generator1 = SimpleRandomNumberGenerator(random_variable_2)
 generator2 = TukeyRandomNumberGenerator(sample, location, 2, 0.1)
 
 modelling = Modelling(generator2, [HodgesLehmannEstimation(), HalfSumEstimation()], resample_count,
